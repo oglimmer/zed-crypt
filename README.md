@@ -2,6 +2,8 @@
 
 Transparent encryption for the [Zed](https://zed.dev) editor. Edit `.cpt` files decrypted in Zed while they stay encrypted on disk. Uses [ccrypt](https://ccrypt.sourceforge.net) format — files are fully compatible with the `ccrypt` CLI.
 
+This tool is not intended to secure critical or highly confidential data in case someone gains access to your local filesystem. Instead, it assumes that your local filesystem is already encrypted. The purpose of this tool is to make it easier to edit encrypted files, for example files stored in GitHub repositories.
+
 ## Install
 
 ```bash
