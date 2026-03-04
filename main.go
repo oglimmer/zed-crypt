@@ -88,7 +88,30 @@ func cmdDecrypt(path string) error {
 	return nil
 }
 
-func cmdEdit(path string) error {
+const daemonEnv = "ZED_CRYPT_DAEMON"
+
+func cmdEdit(path string, foreground bool) error {
+	// If not foreground and not already the daemon, re-exec as a detached background process
+	if !foreground && os.Getenv(daemonEnv) == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("cannot find own executable: %w", err)
+		}
+		cmd := exec.Command(exe, os.Args[1:]...)
+		cmd.Env = append(os.Environ(), daemonEnv+"=1")
+		devNull, _ := os.Open(os.DevNull)
+		cmd.Stdout = devNull
+		cmd.Stderr = devNull
+		cmd.Stdin = devNull
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("cannot start background process: %w", err)
+		}
+		// Detach — don't wait for child
+		cmd.Process.Release()
+		return nil
+	}
+
 	keyfile, err := passwordFile()
 	if err != nil {
 		return err
@@ -190,9 +213,13 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `zed-crypt — transparent encryption for Zed editor
 
 Usage:
-  zed-crypt edit    <file.cpt>   decrypt, open in Zed, re-encrypt on save
-  zed-crypt encrypt <file>       encrypt file → file.cpt
-  zed-crypt decrypt <file.cpt>   decrypt file.cpt → file
+  zed-crypt [--fg] <file.cpt>           decrypt, open in Zed, re-encrypt on save
+  zed-crypt edit [--fg] <file.cpt>      same as above
+  zed-crypt encrypt <file>              encrypt file → file.cpt
+  zed-crypt decrypt <file.cpt>          decrypt file.cpt → file
+
+Flags:
+  --fg    run in foreground (default: background, no output)
 
 Password is read from ~/.zed-crypt
 Encryption: ccrypt format (Rijndael/AES, fully compatible with ccrypt CLI)
@@ -200,21 +227,48 @@ Encryption: ccrypt format (Rijndael/AES, fully compatible with ccrypt CLI)
 	os.Exit(1)
 }
 
+// parseEditArgs extracts --fg flag and file path from args.
+func parseEditArgs(args []string) (file string, fg bool) {
+	for _, a := range args {
+		if a == "--fg" {
+			fg = true
+		} else if file == "" {
+			file = a
+		}
+	}
+	return
+}
+
 func main() {
-	if len(os.Args) < 3 {
+	if len(os.Args) < 2 {
 		usage()
 	}
 
 	var err error
 	switch os.Args[1] {
 	case "edit":
-		err = cmdEdit(os.Args[2])
+		file, fg := parseEditArgs(os.Args[2:])
+		if file == "" {
+			usage()
+		}
+		err = cmdEdit(file, fg)
 	case "encrypt":
+		if len(os.Args) < 3 {
+			usage()
+		}
 		err = cmdEncrypt(os.Args[2])
 	case "decrypt":
+		if len(os.Args) < 3 {
+			usage()
+		}
 		err = cmdDecrypt(os.Args[2])
 	default:
-		usage()
+		// Default command is edit
+		file, fg := parseEditArgs(os.Args[1:])
+		if file == "" {
+			usage()
+		}
+		err = cmdEdit(file, fg)
 	}
 
 	if err != nil {
